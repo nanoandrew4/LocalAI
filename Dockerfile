@@ -277,12 +277,12 @@ WORKDIR /build
 # We need protoc installed, and the version in 22.04 is too old.
 RUN <<EOT bash
     if [ "amd64" = "$TARGETARCH" ]; then
-        curl -L -s https://github.com/protocolbuffers/protobuf/releases/download/v27.1/protoc-27.1-linux-x86_64.zip -o protoc.zip && \
+        curl -L -s https://github.com/protocolbuffers/protobuf/releases/download/v31.1/protoc-31.1-linux-x86_64.zip -o protoc.zip && \
         unzip -j -d /usr/local/bin protoc.zip bin/protoc && \
         rm protoc.zip
     fi
     if [ "arm64" = "$TARGETARCH" ]; then
-        curl -L -s https://github.com/protocolbuffers/protobuf/releases/download/v27.1/protoc-27.1-linux-aarch_64.zip -o protoc.zip && \
+        curl -L -s https://github.com/protocolbuffers/protobuf/releases/download/v31.1/protoc-31.1-linux-aarch_64.zip -o protoc.zip && \
         unzip -j -d /usr/local/bin protoc.zip bin/protoc && \
         rm protoc.zip
     fi
