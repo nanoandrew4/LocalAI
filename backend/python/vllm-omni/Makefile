@@ -21,3 +21,4 @@ protogen-clean:
 .PHONY: clean
 clean: protogen-clean
 	rm -rf venv __pycache__
+

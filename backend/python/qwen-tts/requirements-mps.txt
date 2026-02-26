@@ -1,4 +1,4 @@
 torch
 torchaudio
-qwen-tts
+qwen-tts @ git+https://github.com/dffdeeq/Qwen3-TTS-streaming.git
 sox

@@ -61,14 +61,14 @@ class TestBackendServicer(unittest.TestCase):
                 stub = backend_pb2_grpc.BackendStub(channel)
                 response = stub.LoadModel(backend_pb2.ModelOptions(Model="Tongyi-MAI/Z-Image-Turbo"))
                 self.assertTrue(response.success)
-                
+
                 req = backend_pb2.GenerateImageRequest(
                     positive_prompt="a cup of coffee on the table",
                     dst="/tmp/test_output.png",
                     width=512,
                     height=512,
                     step=20,
-                    seed=42additional_information
+                    seed=42
                 )
                 resp = stub.GenerateImage(req)
                 self.assertTrue(resp.success)
@@ -77,6 +77,6 @@ class TestBackendServicer(unittest.TestCase):
             self.fail("GenerateImage service failed")
         finally:
             self.tearDown()
-additional_information
+
 if __name__ == "__main__":
     unittest.main()

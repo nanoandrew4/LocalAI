@@ -27,14 +27,14 @@ fi
 installRequirements
 
 # Install vllm based on build type
-if [ "x${BUILD_TYPE}" == "xhipblas" ]; then
+if [ "x${BUILD_TYPE:-}" == "xhipblas" ]; then
     # ROCm
     if [ "x${USE_PIP}" == "xtrue" ]; then
         pip install vllm==0.14.0 --extra-index-url https://wheels.vllm.ai/rocm/0.14.0/rocm700
     else
         uv pip install vllm==0.14.0 --extra-index-url https://wheels.vllm.ai/rocm/0.14.0/rocm700
     fi
-elif [ "x${BUILD_TYPE}" == "xcublas" ] || [ "x${BUILD_TYPE}" == "x" ]; then
+elif [ "x${BUILD_TYPE:-}" == "xcublas" ] || [ "x${BUILD_TYPE:-}" == "x" ]; then
     # CUDA (default) or CPU
     if [ "x${USE_PIP}" == "xtrue" ]; then
         pip install vllm==0.14.0 --torch-backend=auto
@@ -42,7 +42,7 @@ elif [ "x${BUILD_TYPE}" == "xcublas" ] || [ "x${BUILD_TYPE}" == "x" ]; then
         uv pip install vllm==0.14.0 --torch-backend=auto
     fi
 else
-    echo "Unsupported build type: ${BUILD_TYPE}" >&2
+    echo "Unsupported build type: ${BUILD_TYPE:-}" >&2
     exit 1
 fi
 
@@ -54,9 +54,9 @@ fi
 cd vllm-omni/
 
 if [ "x${USE_PIP}" == "xtrue" ]; then
-    pip install ${EXTRA_PIP_INSTALL_FLAGS:-} -e .
+    pip install ${EXTRA_PIP_INSTALL_FLAGS:-} .
 else
-    uv pip install ${EXTRA_PIP_INSTALL_FLAGS:-} -e .
+    uv pip install ${EXTRA_PIP_INSTALL_FLAGS:-} .
 fi
 
 cd ..

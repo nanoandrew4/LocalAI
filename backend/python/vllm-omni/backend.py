@@ -8,6 +8,7 @@ This backend provides gRPC access to vllm-omni for multimodal generation:
 - Text generation with multimodal inputs (LLM)
 - Text-to-speech generation
 """
+
 from concurrent import futures
 import traceback
 import argparse
@@ -31,14 +32,14 @@ import grpc
 from vllm_omni.entrypoints.omni import Omni
 from vllm_omni.outputs import OmniRequestOutput
 from vllm_omni.diffusion.data import DiffusionParallelConfig
-from vllm_omni.utils.platform_utils import detect_device_type, is_npu
+from vllm_omni.platforms import current_omni_platform as current_platform
 from vllm import SamplingParams
 from diffusers.utils import export_to_video
 
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 
 # If MAX_WORKERS are specified in the environment use it, otherwise default to 1
-MAX_WORKERS = int(os.environ.get('PYTHON_GRPC_MAX_WORKERS', '1'))
+MAX_WORKERS = int(os.environ.get("PYTHON_GRPC_MAX_WORKERS", "1"))
 
 
 def is_float(s):
@@ -61,7 +62,6 @@ def is_int(s):
 
 # Implement the BackendServicer class with the service methods
 class BackendServicer(backend_pb2_grpc.BackendServicer):
-
     def _detect_model_type(self, model_name):
         """Detect model type from model name."""
         model_lower = model_name.lower()
@@ -71,7 +71,11 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
             return "llm"
         elif "wan" in model_lower or "t2v" in model_lower or "i2v" in model_lower:
             return "video"
-        elif "image" in model_lower or "z-image" in model_lower or "qwen-image" in model_lower:
+        elif (
+            "image" in model_lower
+            or "z-image" in model_lower
+            or "qwen-image" in model_lower
+        ):
             return "image"
         else:
             # Default to image for diffusion models, llm for others
@@ -105,6 +109,7 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
     def _load_video(self, video_path):
         """Load a video from file path or base64 encoded data."""
         from vllm.assets.video import VideoAsset, video_to_ndarrays
+
         if os.path.exists(video_path):
             return video_to_ndarrays(video_path, num_frames=16)
         # Try base64 decode
@@ -122,6 +127,7 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
     def _load_audio(self, audio_path):
         """Load audio from file path or base64 encoded data."""
         import librosa
+
         if os.path.exists(audio_path):
             audio_signal, sr = librosa.load(audio_path, sr=16000)
             return (audio_signal.astype(np.float32), sr)
@@ -140,7 +146,7 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
             return None
 
     def Health(self, request, context):
-        return backend_pb2.Reply(message=bytes("OK", 'utf-8'))
+        return backend_pb2.Reply(message=bytes("OK", "utf-8"))
 
     def LoadModel(self, request, context):
         try:
@@ -166,7 +172,9 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
 
             # Detect model type
             self.model_name = request.Model
-            self.model_type = request.Type if request.Type else self._detect_model_type(request.Model)
+            self.model_type = (
+                request.Type if request.Type else self._detect_model_type(request.Model)
+            )
             print(f"Detected model type: {self.model_type}", file=sys.stderr)
 
             # Build DiffusionParallelConfig if diffusion model (image or video)
@@ -180,19 +188,39 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
                 )
 
             # Build cache_config dict if cache_backend specified
-            cache_backend = self.options.get("cache_backend")  # "cache_dit" or "tea_cache"
+            cache_backend = self.options.get(
+                "cache_backend"
+            )  # "cache_dit" or "tea_cache"
             cache_config = None
             if cache_backend == "cache_dit":
                 cache_config = {
-                    "Fn_compute_blocks": self.options.get("cache_dit_fn_compute_blocks", 1),
-                    "Bn_compute_blocks": self.options.get("cache_dit_bn_compute_blocks", 0),
-                    "max_warmup_steps": self.options.get("cache_dit_max_warmup_steps", 4),
-                    "residual_diff_threshold": self.options.get("cache_dit_residual_diff_threshold", 0.24),
-                    "max_continuous_cached_steps": self.options.get("cache_dit_max_continuous_cached_steps", 3),
-                    "enable_taylorseer": self.options.get("cache_dit_enable_taylorseer", False),
-                    "taylorseer_order": self.options.get("cache_dit_taylorseer_order", 1),
-                    "scm_steps_mask_policy": self.options.get("cache_dit_scm_steps_mask_policy"),
-                    "scm_steps_policy": self.options.get("cache_dit_scm_steps_policy", "dynamic"),
+                    "Fn_compute_blocks": self.options.get(
+                        "cache_dit_fn_compute_blocks", 1
+                    ),
+                    "Bn_compute_blocks": self.options.get(
+                        "cache_dit_bn_compute_blocks", 0
+                    ),
+                    "max_warmup_steps": self.options.get(
+                        "cache_dit_max_warmup_steps", 4
+                    ),
+                    "residual_diff_threshold": self.options.get(
+                        "cache_dit_residual_diff_threshold", 0.24
+                    ),
+                    "max_continuous_cached_steps": self.options.get(
+                        "cache_dit_max_continuous_cached_steps", 3
+                    ),
+                    "enable_taylorseer": self.options.get(
+                        "cache_dit_enable_taylorseer", False
+                    ),
+                    "taylorseer_order": self.options.get(
+                        "cache_dit_taylorseer_order", 1
+                    ),
+                    "scm_steps_mask_policy": self.options.get(
+                        "cache_dit_scm_steps_mask_policy"
+                    ),
+                    "scm_steps_policy": self.options.get(
+                        "cache_dit_scm_steps_policy", "dynamic"
+                    ),
                 }
             elif cache_backend == "tea_cache":
                 cache_config = {
@@ -206,29 +234,41 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
 
             # Add diffusion-specific parameters (image/video models)
             if self.model_type in ["image", "video"]:
-                omni_kwargs.update({
-                    "vae_use_slicing": is_npu(),
-                    "vae_use_tiling": is_npu(),
-                    "cache_backend": cache_backend,
-                    "cache_config": cache_config,
-                    "parallel_config": parallel_config,
-                    "enforce_eager": self.options.get("enforce_eager", request.EnforceEager),
-                    "enable_cpu_offload": self.options.get("enable_cpu_offload", False),
-                })
+                omni_kwargs.update(
+                    {
+                        "vae_use_slicing": current_platform.is_npu(),
+                        "vae_use_tiling": current_platform.is_npu(),
+                        "cache_backend": cache_backend,
+                        "cache_config": cache_config,
+                        "parallel_config": parallel_config,
+                        "enforce_eager": self.options.get(
+                            "enforce_eager", request.EnforceEager
+                        ),
+                        "enable_cpu_offload": self.options.get(
+                            "enable_cpu_offload", False
+                        ),
+                    }
+                )
                 # Video-specific parameters
                 if self.model_type == "video":
-                    omni_kwargs.update({
-                        "boundary_ratio": self.options.get("boundary_ratio", 0.875),
-                        "flow_shift": self.options.get("flow_shift", 5.0),
-                    })
+                    omni_kwargs.update(
+                        {
+                            "boundary_ratio": self.options.get("boundary_ratio", 0.875),
+                            "flow_shift": self.options.get("flow_shift", 5.0),
+                        }
+                    )
 
             # Add LLM/TTS-specific parameters
             if self.model_type in ["llm", "tts"]:
-                omni_kwargs.update({
-                    "stage_configs_path": self.options.get("stage_configs_path"),
-                    "log_stats": self.options.get("enable_stats", False),
-                    "stage_init_timeout": self.options.get("stage_init_timeout", 300),
-                })
+                omni_kwargs.update(
+                    {
+                        "stage_configs_path": self.options.get("stage_configs_path"),
+                        "log_stats": self.options.get("enable_stats", False),
+                        "stage_init_timeout": self.options.get(
+                            "stage_init_timeout", 300
+                        ),
+                    }
+                )
                 # vllm engine options (passed through Omni for LLM/TTS)
                 if request.GPUMemoryUtilization > 0:
                     omni_kwargs["gpu_memory_utilization"] = request.GPUMemoryUtilization
@@ -246,19 +286,28 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
         except Exception as err:
             print(f"Unexpected {err=}, {type(err)=}", file=sys.stderr)
             traceback.print_exc()
-            return backend_pb2.Result(success=False, message=f"Unexpected {err=}, {type(err)=}")
+            return backend_pb2.Result(
+                success=False, message=f"Unexpected {err=}, {type(err)=}"
+            )
 
     def GenerateImage(self, request, context):
         try:
             # Validate model is loaded and is image/diffusion type
-            if not hasattr(self, 'omni'):
-                return backend_pb2.Result(success=False, message="Model not loaded. Call LoadModel first.")
+            if not hasattr(self, "omni"):
+                return backend_pb2.Result(
+                    success=False, message="Model not loaded. Call LoadModel first."
+                )
             if self.model_type not in ["image"]:
-                return backend_pb2.Result(success=False, message=f"Model type {self.model_type} does not support image generation")
+                return backend_pb2.Result(
+                    success=False,
+                    message=f"Model type {self.model_type} does not support image generation",
+                )
 
             # Extract parameters
             prompt = request.positive_prompt
-            negative_prompt = request.negative_prompt if request.negative_prompt else None
+            negative_prompt = (
+                request.negative_prompt if request.negative_prompt else None
+            )
             width = request.width if request.width > 0 else 1024
             height = request.height if request.height > 0 else 1024
             seed = request.seed if request.seed > 0 else None
@@ -269,16 +318,29 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
             # Create generator if seed provided
             generator = None
             if seed:
-                device = detect_device_type()
+                if current_platform.is_cuda():
+                    device = "cuda"
+                elif current_platform.is_rocm():
+                    device = "cuda"
+                elif current_platform.is_npu():
+                    device = "npu"
+                elif current_platform.is_xpu():
+                    device = "xpu"
+                else:
+                    device = "cpu"
                 generator = torch.Generator(device=device).manual_seed(seed)
 
             # Handle image input for image editing
             pil_image = None
             if request.src or (request.ref_images and len(request.ref_images) > 0):
-                image_path = request.ref_images[0] if request.ref_images else request.src
+                image_path = (
+                    request.ref_images[0] if request.ref_images else request.src
+                )
                 pil_image = self._load_image(image_path)
                 if pil_image is None:
-                    return backend_pb2.Result(success=False, message=f"Invalid image source: {image_path}")
+                    return backend_pb2.Result(
+                        success=False, message=f"Invalid image source: {image_path}"
+                    )
                 pil_image = pil_image.convert("RGB")
 
             # Build generate kwargs
@@ -303,11 +365,18 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
                 return backend_pb2.Result(success=False, message="No output generated")
 
             first_output = outputs[0]
-            if not hasattr(first_output, "request_output") or not first_output.request_output:
-                return backend_pb2.Result(success=False, message="Invalid output structure")
+            if (
+                not hasattr(first_output, "request_output")
+                or not first_output.request_output
+            ):
+                return backend_pb2.Result(
+                    success=False, message="Invalid output structure"
+                )
 
             req_out = first_output.request_output[0]
-            if not isinstance(req_out, OmniRequestOutput) or not hasattr(req_out, "images"):
+            if not isinstance(req_out, OmniRequestOutput) or not hasattr(
+                req_out, "images"
+            ):
                 return backend_pb2.Result(success=False, message="No images in output")
 
             images = req_out.images
@@ -317,20 +386,29 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
             # Save image
             output_image = images[0]
             output_image.save(request.dst)
-            return backend_pb2.Result(message="Image generated successfully", success=True)
+            return backend_pb2.Result(
+                message="Image generated successfully", success=True
+            )
 
         except Exception as err:
             print(f"Error generating image: {err}", file=sys.stderr)
             traceback.print_exc()
-            return backend_pb2.Result(success=False, message=f"Error generating image: {err}")
+            return backend_pb2.Result(
+                success=False, message=f"Error generating image: {err}"
+            )
 
     def GenerateVideo(self, request, context):
         try:
             # Validate model is loaded and is video/diffusion type
-            if not hasattr(self, 'omni'):
-                return backend_pb2.Result(success=False, message="Model not loaded. Call LoadModel first.")
+            if not hasattr(self, "omni"):
+                return backend_pb2.Result(
+                    success=False, message="Model not loaded. Call LoadModel first."
+                )
             if self.model_type not in ["video"]:
-                return backend_pb2.Result(success=False, message=f"Model type {self.model_type} does not support video generation")
+                return backend_pb2.Result(
+                    success=False,
+                    message=f"Model type {self.model_type} does not support video generation",
+                )
 
             # Extract parameters
             prompt = request.prompt
@@ -347,7 +425,16 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
             # Create generator
             generator = None
             if seed:
-                device = detect_device_type()
+                if current_platform.is_cuda():
+                    device = "cuda"
+                elif current_platform.is_rocm():
+                    device = "cuda"
+                elif current_platform.is_npu():
+                    device = "npu"
+                elif current_platform.is_xpu():
+                    device = "xpu"
+                else:
+                    device = "cpu"
                 generator = torch.Generator(device=device).manual_seed(seed)
 
             # Handle image input for image-to-video
@@ -355,7 +442,10 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
             if request.start_image:
                 pil_image = self._load_image(request.start_image)
                 if pil_image is None:
-                    return backend_pb2.Result(success=False, message=f"Invalid start_image: {request.start_image}")
+                    return backend_pb2.Result(
+                        success=False,
+                        message=f"Invalid start_image: {request.start_image}",
+                    )
                 pil_image = pil_image.convert("RGB")
                 # Resize to target dimensions
                 pil_image = pil_image.resize((width, height), Image.Resampling.LANCZOS)
@@ -385,22 +475,41 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
 
                 if hasattr(first_item, "final_output_type"):
                     if first_item.final_output_type != "image":
-                        return backend_pb2.Result(success=False, message=f"Unexpected output type: {first_item.final_output_type}")
+                        return backend_pb2.Result(
+                            success=False,
+                            message=f"Unexpected output type: {first_item.final_output_type}",
+                        )
 
                     # Pipeline mode: extract from nested request_output
-                    if hasattr(first_item, "is_pipeline_output") and first_item.is_pipeline_output:
-                        if isinstance(first_item.request_output, list) and len(first_item.request_output) > 0:
+                    if (
+                        hasattr(first_item, "is_pipeline_output")
+                        and first_item.is_pipeline_output
+                    ):
+                        if (
+                            isinstance(first_item.request_output, list)
+                            and len(first_item.request_output) > 0
+                        ):
                             inner_output = first_item.request_output[0]
-                            if isinstance(inner_output, OmniRequestOutput) and hasattr(inner_output, "images"):
-                                frames = inner_output.images[0] if inner_output.images else None
+                            if isinstance(inner_output, OmniRequestOutput) and hasattr(
+                                inner_output, "images"
+                            ):
+                                frames = (
+                                    inner_output.images[0]
+                                    if inner_output.images
+                                    else None
+                                )
                     # Diffusion mode: use direct images field
                     elif hasattr(first_item, "images") and first_item.images:
                         frames = first_item.images
                     else:
-                        return backend_pb2.Result(success=False, message="No video frames found")
+                        return backend_pb2.Result(
+                            success=False, message="No video frames found"
+                        )
 
             if frames is None:
-                return backend_pb2.Result(success=False, message="No video frames found in output")
+                return backend_pb2.Result(
+                    success=False, message="No video frames found in output"
+                )
 
             # Convert frames to numpy array (following example)
             if isinstance(frames, torch.Tensor):
@@ -428,12 +537,16 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
 
             # Save video
             export_to_video(video_array, request.dst, fps=fps)
-            return backend_pb2.Result(message="Video generated successfully", success=True)
+            return backend_pb2.Result(
+                message="Video generated successfully", success=True
+            )
 
         except Exception as err:
             print(f"Error generating video: {err}", file=sys.stderr)
             traceback.print_exc()
-            return backend_pb2.Result(success=False, message=f"Error generating video: {err}")
+            return backend_pb2.Result(
+                success=False, message=f"Error generating video: {err}"
+            )
 
     def Predict(self, request, context):
         """Non-streaming text generation with multimodal inputs."""
@@ -442,7 +555,7 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
             res = next(gen)
             return res
         except StopIteration:
-            return backend_pb2.Reply(message=bytes("", 'utf-8'))
+            return backend_pb2.Reply(message=bytes("", "utf-8"))
 
     def PredictStream(self, request, context):
         """Streaming text generation with multimodal inputs."""
@@ -452,11 +565,18 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
         """Internal method for text generation (streaming and non-streaming)."""
         try:
             # Validate model is loaded and is LLM type
-            if not hasattr(self, 'omni'):
-                yield backend_pb2.Reply(message=bytes("Model not loaded. Call LoadModel first.", 'utf-8'))
+            if not hasattr(self, "omni"):
+                yield backend_pb2.Reply(
+                    message=bytes("Model not loaded. Call LoadModel first.", "utf-8")
+                )
                 return
             if self.model_type not in ["llm"]:
-                yield backend_pb2.Reply(message=bytes(f"Model type {self.model_type} does not support text generation", 'utf-8'))
+                yield backend_pb2.Reply(
+                    message=bytes(
+                        f"Model type {self.model_type} does not support text generation",
+                        "utf-8",
+                    )
+                )
                 return
 
             # Extract prompt
@@ -471,7 +591,7 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
                     prompt += f"<|im_start|>{role}\n{content}<|im_end|>\n"
                 prompt += "<|im_start|>assistant\n"
             else:
-                yield backend_pb2.Reply(message=bytes("", 'utf-8'))
+                yield backend_pb2.Reply(message=bytes("", "utf-8"))
                 return
 
             # Build multi_modal_data dict
@@ -485,6 +605,7 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
                     if img:
                         # Convert to format expected by vllm
                         from vllm.multimodal.image import convert_image_mode
+
                         img_data = convert_image_mode(img, "RGB")
                         image_data.append(img_data)
                 if image_data:
@@ -522,9 +643,15 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
                 top_p=request.TopP if request.TopP > 0 else 0.9,
                 top_k=request.TopK if request.TopK > 0 else -1,
                 max_tokens=request.Tokens if request.Tokens > 0 else 200,
-                presence_penalty=request.PresencePenalty if request.PresencePenalty != 0 else 0.0,
-                frequency_penalty=request.FrequencyPenalty if request.FrequencyPenalty != 0 else 0.0,
-                repetition_penalty=request.RepetitionPenalty if request.RepetitionPenalty != 0 else 1.0,
+                presence_penalty=request.PresencePenalty
+                if request.PresencePenalty != 0
+                else 0.0,
+                frequency_penalty=request.FrequencyPenalty
+                if request.FrequencyPenalty != 0
+                else 0.0,
+                repetition_penalty=request.RepetitionPenalty
+                if request.RepetitionPenalty != 0
+                else 1.0,
                 seed=request.Seed if request.Seed > 0 else None,
                 stop=request.StopPrompts if request.StopPrompts else None,
                 stop_token_ids=request.StopTokenIds if request.StopTokenIds else None,
@@ -544,24 +671,31 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
                         if streaming:
                             # Remove already sent text (vllm concatenates)
                             delta_text = text_output.removeprefix(generated_text)
-                            yield backend_pb2.Reply(message=bytes(delta_text, encoding='utf-8'))
+                            yield backend_pb2.Reply(
+                                message=bytes(delta_text, encoding="utf-8")
+                            )
                         generated_text = text_output
 
             if not streaming:
-                yield backend_pb2.Reply(message=bytes(generated_text, encoding='utf-8'))
+                yield backend_pb2.Reply(message=bytes(generated_text, encoding="utf-8"))
 
         except Exception as err:
             print(f"Error in Predict: {err}", file=sys.stderr)
             traceback.print_exc()
-            yield backend_pb2.Reply(message=bytes(f"Error: {err}", encoding='utf-8'))
+            yield backend_pb2.Reply(message=bytes(f"Error: {err}", encoding="utf-8"))
 
     def TTS(self, request, context):
         try:
             # Validate model is loaded and is TTS type
-            if not hasattr(self, 'omni'):
-                return backend_pb2.Result(success=False, message="Model not loaded. Call LoadModel first.")
+            if not hasattr(self, "omni"):
+                return backend_pb2.Result(
+                    success=False, message="Model not loaded. Call LoadModel first."
+                )
             if self.model_type not in ["tts"]:
-                return backend_pb2.Result(success=False, message=f"Model type {self.model_type} does not support TTS")
+                return backend_pb2.Result(
+                    success=False,
+                    message=f"Model type {self.model_type} does not support TTS",
+                )
 
             # Extract parameters
             text = request.text
@@ -582,7 +716,7 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
                     "text": [text],
                     "language": [language],
                     "max_new_tokens": [2048],
-                }
+                },
             }
 
             # Add task-specific fields
@@ -591,31 +725,92 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
                     inputs["additional_information"]["speaker"] = [voice]
                 # Add instruct if provided in options
                 if "instruct" in self.options:
-                    inputs["additional_information"]["instruct"] = [self.options["instruct"]]
+                    inputs["additional_information"]["instruct"] = [
+                        self.options["instruct"]
+                    ]
             elif task_type == "VoiceDesign":
                 if "instruct" in self.options:
-                    inputs["additional_information"]["instruct"] = [self.options["instruct"]]
+                    inputs["additional_information"]["instruct"] = [
+                        self.options["instruct"]
+                    ]
                 inputs["additional_information"]["non_streaming_mode"] = [True]
             elif task_type == "Base":
                 # Voice cloning requires ref_audio and ref_text
                 if "ref_audio" in self.options:
-                    inputs["additional_information"]["ref_audio"] = [self.options["ref_audio"]]
+                    inputs["additional_information"]["ref_audio"] = [
+                        self.options["ref_audio"]
+                    ]
                 if "ref_text" in self.options:
-                    inputs["additional_information"]["ref_text"] = [self.options["ref_text"]]
+                    inputs["additional_information"]["ref_text"] = [
+                        self.options["ref_text"]
+                    ]
                 if "x_vector_only_mode" in self.options:
-                    inputs["additional_information"]["x_vector_only_mode"] = [self.options["x_vector_only_mode"]]
+                    inputs["additional_information"]["x_vector_only_mode"] = [
+                        self.options["x_vector_only_mode"]
+                    ]
 
-            # Build sampling params
-            sampling_params = SamplingParams(
-                temperature=0.9,
-                top_p=1.0,
-                top_k=50,
-                max_tokens=2048,
-                seed=42,
-                detokenize=False,
-                repetition_penalty=1.05,
-            )
-            sampling_params_list = [sampling_params]
+            # Build sampling params - one per stage for multi-stage models like Qwen3-TTS
+            # Create fresh SamplingParams for each stage with user preferences
+            num_stages = len(self.omni.stage_list)
+            sampling_params_list = []
+            for i in range(num_stages):
+                # Get base params if available, otherwise use defaults
+                base_params = (
+                    self.omni.default_sampling_params_list[i]
+                    if i < len(self.omni.default_sampling_params_list)
+                    else None
+                )
+
+                # Create new SamplingParams with user preferences
+                # Extract values from base params if available
+                sp_kwargs = {}
+                if base_params is not None:
+                    # Copy attributes from base params that exist
+                    for attr in [
+                        "temperature",
+                        "top_p",
+                        "top_k",
+                        "max_tokens",
+                        "seed",
+                        "detokenize",
+                        "repetition_penalty",
+                    ]:
+                        if hasattr(base_params, attr):
+                            try:
+                                sp_kwargs[attr] = getattr(base_params, attr)
+                            except:
+                                pass
+
+                # Override with user preferences (handle missing attributes gracefully)
+                try:
+                    temp_val = (
+                        request.temperature if hasattr(request, "temperature") else 0
+                    )
+                    sp_kwargs["temperature"] = (
+                        temp_val
+                        if temp_val > 0
+                        else (sp_kwargs.get("temperature") or 0.9)
+                    )
+                except (AttributeError, TypeError):
+                    sp_kwargs["temperature"] = sp_kwargs.get("temperature") or 0.9
+
+                try:
+                    top_p_val = request.top_p if hasattr(request, "top_p") else 0
+                    sp_kwargs["top_p"] = (
+                        top_p_val if top_p_val > 0 else (sp_kwargs.get("top_p") or 1.0)
+                    )
+                except (AttributeError, TypeError):
+                    sp_kwargs["top_p"] = sp_kwargs.get("top_p") or 1.0
+                sp_kwargs["top_k"] = sp_kwargs.get("top_k") or 50
+                sp_kwargs["max_tokens"] = sp_kwargs.get("max_tokens") or 2048
+                sp_kwargs["repetition_penalty"] = (
+                    sp_kwargs.get("repetition_penalty") or 1.05
+                )
+                sp_kwargs["seed"] = sp_kwargs.get("seed") or 42
+                if "detokenize" not in sp_kwargs:
+                    sp_kwargs["detokenize"] = False
+
+                sampling_params_list.append(SamplingParams(**sp_kwargs))
 
             # Call omni.generate()
             omni_generator = self.omni.generate(inputs, sampling_params_list)
@@ -633,24 +828,37 @@ class BackendServicer(backend_pb2_grpc.BackendServicer):
                             audio_numpy = audio_numpy.flatten()
 
                         # Save audio file
-                        sf.write(request.dst, audio_numpy, samplerate=audio_samplerate, format="WAV")
-                        return backend_pb2.Result(message="TTS audio generated successfully", success=True)
+                        sf.write(
+                            request.dst,
+                            audio_numpy,
+                            samplerate=audio_samplerate,
+                            format="WAV",
+                        )
+                        return backend_pb2.Result(
+                            message="TTS audio generated successfully", success=True
+                        )
 
-            return backend_pb2.Result(success=False, message="No audio output generated")
+            return backend_pb2.Result(
+                success=False, message="No audio output generated"
+            )
 
         except Exception as err:
             print(f"Error generating TTS: {err}", file=sys.stderr)
             traceback.print_exc()
-            return backend_pb2.Result(success=False, message=f"Error generating TTS: {err}")
+            return backend_pb2.Result(
+                success=False, message=f"Error generating TTS: {err}"
+            )
 
 
 def serve(address):
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=MAX_WORKERS),
+    server = grpc.server(
+        futures.ThreadPoolExecutor(max_workers=MAX_WORKERS),
         options=[
-            ('grpc.max_message_length', 50 * 1024 * 1024),  # 50MB
-            ('grpc.max_send_message_length', 50 * 1024 * 1024),
-            ('grpc.max_receive_message_length', 50 * 1024 * 1024),
-        ])
+            ("grpc.max_message_length", 50 * 1024 * 1024),  # 50MB
+            ("grpc.max_send_message_length", 50 * 1024 * 1024),
+            ("grpc.max_receive_message_length", 50 * 1024 * 1024),
+        ],
+    )
     backend_pb2_grpc.add_BackendServicer_to_server(BackendServicer(), server)
     server.add_insecure_port(address)
     server.start()
